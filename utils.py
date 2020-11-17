@@ -18,8 +18,8 @@ if torch.cuda.is_available():
 else:
     device = torch.device("cpu")
 
-model_dir = '/content/drive/HoloGAN/models'
-result_dir = '/content/drive/HoloGAN/results'
+model_dir = './models'
+result_dir = './results'
 
 # SAMPLING FUNCTIONS
 def sampling_Z(batch_size = 32, z_dim = 128):
