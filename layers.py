@@ -1,20 +1,19 @@
 import torch
 from torch import nn, Tensor
 from tqdm.auto import tqdm
-from torchvision import transforms
-from torchvision import datasets
-from torchvision.datasets import CelebA, MNIST
 import matplotlib.pyplot as plt
-import pytorch3d
-from pytorch3d.transforms import Rotate, Translate, Transform3d
-from torch.nn.utils.spectral_norm import spectral_norm as SpectralNorm
 from torch.utils.data import DataLoader
 import random
 import numpy as np
 import math
+from torch.nn.utils.spectral_norm import spectral_norm as SpectralNorm
 
 # rendering components
-from pytorch3d.renderer.cameras import look_at_rotation, camera_position_from_spherical_angles, look_at_view_transform
+import pytorch3d
+from pytorch3d.renderer.cameras import (
+    camera_position_from_spherical_angles,
+    look_at_rotation   
+)
 
 # Set the cuda device 
 if torch.cuda.is_available():
@@ -87,13 +86,13 @@ class AdaIN(nn.Module):
         style_scale = self.style_scale_transform(z)
         style_shift = self.style_shift_transform(z)
         if self.is2d:
-          style_scale = style_scale[:,:,None,None]
-          style_shift = style_scale[:,:]
-          transformed_image = normalized_image * style_scale + style_shift
+            style_scale = style_scale[:,:,None,None]
+            style_shift = style_scale[:,:]
+            transformed_image = normalized_image * style_scale + style_shift
         else:
-          style_scale = style_scale[:,:,None,None,None]
-          style_shift = style_shift[:,:,None,None,None]
-          transformed_image = normalized_image * style_scale + style_shift
+            style_scale = style_scale[:,:,None,None,None]
+            style_shift = style_shift[:,:,None,None,None]
+            transformed_image = normalized_image * style_scale + style_shift
         return transformed_image
 
 class ProjUnit(nn.Module):
@@ -127,37 +126,52 @@ class GenBlock3d(nn.Module):
     def forward(self, image, z):
         x = image 
         if self.use_conv:
-          x = self.conv(image)
-          x = x[:,:, 0:image.shape[2] * self.stride, 0:image.shape[3] * self.stride, 0:image.shape[4] * self.stride]
+            x = self.conv(image)
+            x = x[:,:, 0:image.shape[2] * self.stride, 0:image.shape[3] * self.stride, 0:image.shape[4] * self.stride]
         if (self.use_adain):
-          map = self.map(z)
-          x = self.adain(x, map)
+            map = self.map(z)
+            x = self.adain(x, map)
         return self.act(x)
 
 class GenBlock2d(nn.Module):
-    def __init__(self, input_channels, output_channels, z_dim=128, isLastLayer = False):
+    def __init__(self, input_channels, output_channels, z_dim=128, isLastLayer = False, use_activation=True):
         super(GenBlock2d, self).__init__()
 
         if (isLastLayer == False):
-          self.stride = 2
-          self.conv = nn.ConvTranspose2d(input_channels, output_channels, kernel_size = 4, stride = self.stride, padding = 0)
-          self.adain = AdaIN(output_channels, z_dim, is2d=True)
-          self.act = nn.LeakyReLU()
-          self.use_adain = True
+            self.stride = 2
+            self.conv = nn.ConvTranspose2d(input_channels, output_channels, kernel_size = 4, stride = self.stride, padding = 0)
+            self.adain = AdaIN(output_channels, z_dim, is2d=True)
+            if (use_activation):
+                self.act = nn.LeakyReLU()
+            self.use_adain = True
         else:
-          self.stride = 1
-          self.conv = nn.Conv2d(input_channels, output_channels, kernel_size = 4, stride = self.stride, padding = 2)
-          self.act = nn.Tanh()
-          self.use_adain = False
+            self.stride = 1
+            self.conv = nn.Conv2d(input_channels, output_channels, kernel_size = 4, stride = self.stride, padding = 2)
+            self.act = None
+            if (use_activation):
+                self.act = nn.Tanh()
+            self.use_adain = False
 
     def forward(self, image, w = None):
         x = image 
         x = self.conv(image)
         x = x[:,:, 0:image.shape[2] * self.stride, 0:image.shape[3] * self.stride]
-        if (self.use_adain == True):
-          x = self.adain(x, w)
-        return self.act(x)
+        x = self.adain(x, w) if self.use_adain else x
+        return self.act(x) if self.act != None else x
 
+class DBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(DBlock, self).__init__()
+        self.conv = spectral_norm(nn.Conv2d(in_channels, out_channels, kernel_size = 3, stride = 2, padding=1))
+        self.instance_norm = nn.InstanceNorm2d(out_channels, affine=True)
+        self.rl = nn.LeakyReLU()
+
+    def forward(self, input):
+        x = self.conv(input)
+        x = self.instance_norm(x)
+        return self.rl(x)
+
+    
 from torch.autograd import Variable
 
 class SpectralNorm:

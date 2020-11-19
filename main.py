@@ -2,6 +2,7 @@ import torch
 from torch import nn, Tensor
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torchvision import datasets
 from tqdm.auto import tqdm
 import random
 import numpy as np
